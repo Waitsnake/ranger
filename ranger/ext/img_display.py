@@ -23,7 +23,7 @@ import warnings
 import json
 from PIL import Image, ExifTags
 import threading
-from subprocess import Popen, PIPE
+from subprocess import Popen, PIPE, check_output
 from collections import defaultdict
 
 import termios
@@ -308,8 +308,10 @@ class ITerm2ImageDisplayer(ImageDisplayer, FileManagerAware):
         image_width, image_height = self._get_image_dimensions(path)
         if max_cols == 0 or max_rows == 0 or image_width == 0 or image_height == 0:
             return ""
+        max_width = self.fm.settings.iterm2_font_width * max_cols
+        max_height = self.fm.settings.iterm2_font_height * max_rows
         image_width = self._fit_width(
-            image_width, image_height, max_cols, max_rows)
+            image_width, image_height, max_width, max_height)
         content = self._encode_image_content(path)
         display_protocol = "\033"
         close_protocol = "\a"
@@ -325,9 +327,8 @@ class ITerm2ImageDisplayer(ImageDisplayer, FileManagerAware):
             close_protocol)
         return text
 
-    def _fit_width(self, width, height, max_cols, max_rows):
-        max_width = self.fm.settings.iterm2_font_width * max_cols
-        max_height = self.fm.settings.iterm2_font_height * max_rows
+    @staticmethod
+    def _fit_width(width, height, max_width, max_height):
         if height > max_height:
             if width > max_width:
                 width_scale = max_width / width
@@ -452,6 +453,48 @@ class TerminologyImageDisplayer(ImageDisplayer, FileManagerAware):
     def quit(self):
         self.clear(0, 0, 0, 0)
 
+@register_image_displayer("sixel")
+class SixelImageDisplayer(ImageDisplayer, FileManagerAware):
+    def draw(self, path, start_x, start_y, max_cols, max_rows):
+        rows, cols, xpixels, ypixels = self._get_terminal_dimensions()
+
+        col_width = (xpixels // cols)
+        row_height = (ypixels // rows)
+        max_width = col_width * max_cols
+        max_height = row_height * max_rows
+
+        image_width, image_height = ITerm2ImageDisplayer._get_image_dimensions(path)
+
+        fit_image_width = int(ITerm2ImageDisplayer._fit_width(
+            image_width, image_height, max_width, max_height))
+
+        # alternative sixel displaying method to convert (not used)
+        #fit_width = "{}".format(fit_image_width)
+        #args = ['img2sixel',
+        #        '-w', fit_width,
+        #        path]
+        #sixel = check_output(args)
+
+        fit_image_height = image_height * fit_image_width // image_width
+        geometry = "{}x{}".format(fit_image_width, fit_image_height)
+        args = ['convert', path + "[0]",
+                '-geometry', geometry,
+                "sixel:-"]
+        sixel = check_output(args)
+
+        move_cur(start_y, start_x)
+        sys.stdout.buffer.write(sixel)
+        sys.stdout.flush()
+
+    def _get_terminal_dimensions(self):
+        farg = struct.pack("HHHH", 0, 0, 0, 0)
+        fd_stdout = sys.stdout.fileno()
+        fretint = fcntl.ioctl(fd_stdout, termios.TIOCGWINSZ, farg)
+        return struct.unpack("HHHH", fretint)
+
+    def clear(self, start_x, start_y, width, height):
+        self.fm.ui.win.redrawwin()
+        self.fm.ui.win.refresh()
 
 @register_image_displayer("urxvt")
 class URXVTImageDisplayer(ImageDisplayer, FileManagerAware):
