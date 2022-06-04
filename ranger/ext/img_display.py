@@ -21,6 +21,7 @@ import struct
 import sys
 import warnings
 import json
+from PIL import Image, ExifTags
 import threading
 from subprocess import Popen, PIPE
 from collections import defaultdict
@@ -382,9 +383,33 @@ class ITerm2ImageDisplayer(ImageDisplayer, FileManagerAware):
                     file_handle.seek(1, 1)
                     height, width = struct.unpack('>HH', file_handle.read(4))
                 except unreadable:
-                    height, width = 0, 0
+                    # use alternative method to get image dimensions in case something in algo went wrong
+                    im = Image.open(path)
+                    for orientation in ExifTags.TAGS.keys():
+                        if ExifTags.TAGS[orientation]=='Orientation':
+                            break
+                    # a orientation tag was set (maybe case of 180 rotation not correct handeled yet!)
+                    if orientation > 0:
+                        width, height = im.size
+                    # no orientation tag set
+                    else:
+                        height, width = im.size
+                    im.close();
             else:
-                return 0, 0
+                file_handle.close()
+                # use alternative method to get image dimensions in case something in algo went wrong
+                im = Image.open(path)
+                for orientation in ExifTags.TAGS.keys():
+                    if ExifTags.TAGS[orientation]=='Orientation':
+                        break
+                # a orientation tag was set (maybe case of 180 rotation not correct handeled yet!)
+                if orientation > 0:
+                    width, height = im.size
+                # no orientation tag set
+                else:
+                    height, width = im.size
+                im.close();
+                return width, height
         return width, height
 
 
